@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://127.0.0.1:8765/api/agents)",
+      "Bash(python3 -m json.tool)",
+      "Bash(lsof -ti:8080)",
+      "Bash(xargs kill -9)",
+      "Bash(lsof -ti:8765)",
+      "Bash(grep -noE \"[0-9]{8,10}:[A-Za-z0-9_-]{30,}\" \"실행/agent_url analyzer/nohup.out\")",
+      "Bash(grep -c \"[0-9]\\\\{8,10\\\\}:[A-Za-z0-9_-]\\\\{30,\\\\}\" \"실행/agent_url analyzer/nohup.out\" \"실행/agent_card messenger/nohup.out\" \"종료/agent_calender register/nohup.out\" \"종료/agent_agent monitoring/nohup.out\" \"종료/agent_gemini flash/nohup.out\")",
+      "Bash(grep -rnE \"AIza[0-9A-Za-z_-]{20,}|[0-9]{8,10}:[A-Za-z0-9_-]{30,}|sk-[A-Za-z0-9]{20,}\" --include=\"*.json\" --include=\"*.md\" .)"
+    ]
+  }
+}

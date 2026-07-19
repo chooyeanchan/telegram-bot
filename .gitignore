@@ -1,0 +1,30 @@
+# 환경변수/민감정보
+.env
+**/.env
+token.json
+**/token.json
+credentials.json
+**/credentials.json
+cookies.txt
+**/cookies.txt
+
+# 가상환경
+venv/
+**/venv/
+
+# 로그/실행 부산물
+nohup.out
+**/nohup.out
+logs/
+**/logs/
+pids.json
+**/pids.json
+
+# Python 캐시
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+**/.DS_Store

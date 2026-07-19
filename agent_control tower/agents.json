@@ -1,0 +1,92 @@
+{
+  "agents": [
+    {
+      "id": "monitoring",
+      "name": "모니터링 봇",
+      "emoji": "📡",
+      "description": "텔레그램으로 다른 에이전트들의 상태를 모니터링하고 제어",
+      "dir": "../종료/agent_agent monitoring",
+      "script": "bot.py",
+      "category": "monitoring",
+      "tags": ["telegram", "monitoring"],
+      "group": "archived"
+    },
+    {
+      "id": "card_messenger",
+      "name": "명함 메신저",
+      "emoji": "💼",
+      "description": "명함을 스캔해 OCR로 정보를 추출하고 이메일로 전송",
+      "dir": "../실행/agent_card messenger",
+      "script": "bot.py",
+      "category": "utility",
+      "tags": ["telegram", "ocr", "email"],
+      "group": "active"
+    },
+    {
+      "id": "url_analyzer",
+      "name": "URL 분석기",
+      "emoji": "🔗",
+      "description": "URL(유튜브/웹페이지/PDF)을 분석하고 요약해 마크다운으로 저장",
+      "dir": "../실행/agent_url analyzer",
+      "script": "main.py",
+      "category": "research",
+      "tags": ["telegram", "summarize", "markdown"],
+      "group": "active"
+    },
+    {
+      "id": "deep_research",
+      "name": "딥 리서치",
+      "emoji": "🔬",
+      "description": "특정 주제에 대해 심층 리서치를 수행하고 보고서 생성",
+      "dir": "../실행/agent_deep research",
+      "script": "bot.py",
+      "category": "research",
+      "tags": ["telegram", "research", "ai"],
+      "group": "active"
+    },
+    {
+      "id": "calendar",
+      "name": "캘린더 등록",
+      "emoji": "📅",
+      "description": "자연어로 Google Calendar 일정을 등록·조회·삭제",
+      "dir": "../종료/agent_calender register",
+      "script": "main.py",
+      "category": "productivity",
+      "tags": ["telegram", "google", "calendar"],
+      "group": "archived"
+    },
+    {
+      "id": "gemini_flash",
+      "name": "제미나이 플래시",
+      "emoji": "⚡",
+      "description": "Gemini 2.0 Flash 기반 범용 AI 챗봇",
+      "dir": "../종료/agent_gemini flash",
+      "script": "main.py",
+      "category": "ai",
+      "tags": ["telegram", "gemini", "chatbot"],
+      "group": "archived"
+    },
+    {
+      "id": "good_place",
+      "name": "맛집 추천",
+      "emoji": "🍽️",
+      "description": "위치 기반으로 맛집·장소를 검색하고 추천",
+      "dir": "../종료/agent_good place",
+      "script": "main.py",
+      "category": "utility",
+      "tags": ["telegram", "location", "search"],
+      "group": "archived"
+    },
+    {
+      "id": "todo_list",
+      "name": "할 일 목록",
+      "emoji": "✅",
+      "description": "마크다운 파일 기반 할 일 관리 봇",
+      "dir": "../종료/agent_to do list",
+      "script": "bot.py",
+      "category": "productivity",
+      "tags": ["telegram", "todo", "markdown"],
+      "group": "archived"
+    }
+  ]
+}

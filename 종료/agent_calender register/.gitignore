@@ -1,0 +1,8 @@
+.env
+credentials.json
+token.json
+nohup.out
+__pycache__/
+*.pyc
+.DS_Store
+.claude/settings.local.json

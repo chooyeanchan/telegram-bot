@@ -1,0 +1,7 @@
+.env
+nohup.out
+agent_pids.json
+__pycache__/
+*.pyc
+.DS_Store
+.claude/settings.local.json

@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Control Tower</title>
+<style>
+  :root {
+    --bg: #0d0f17;
+    --surface: #161926;
+    --surface2: #1e2235;
+    --border: #2a2f45;
+    --text: #e2e8f0;
+    --text-muted: #64748b;
+    --text-dim: #94a3b8;
+    --accent: #6366f1;
+    --accent-glow: rgba(99,102,241,0.3);
+    --green: #22c55e;
+    --green-glow: rgba(34,197,94,0.2);
+    --red: #ef4444;
+    --red-glow: rgba(239,68,68,0.2);
+    --yellow: #f59e0b;
+    --card-radius: 14px;
+    --font: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+  .logo h1 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .logo span {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: block;
+    font-weight: 400;
+  }
+  .header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .server-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--surface2);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+  }
+  .server-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background 0.3s;
+  }
+  .server-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .refresh-time { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Stats bar ── */
+  .stats-bar {
+    display: flex;
+    gap: 16px;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .stat-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+    min-width: 130px;
+  }
+  .stat-chip .icon { font-size: 20px; }
+  .stat-chip .label { font-size: 11px; color: var(--text-muted); }
+  .stat-chip .value { font-size: 20px; font-weight: 700; line-height: 1; }
+  .stat-chip.running .value { color: var(--green); }
+  .stat-chip.total .value { color: var(--accent); }
+  .stat-chip.stopped .value { color: var(--text-dim); }
+
+  /* ── Main layout ── */
+  main {
+    padding: 28px 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ── Filters ── */
+  .filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font);
+  }
+  .filter-btn:hover { border-color: var(--accent); color: var(--text); }
+  .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ── Agent Grid ── */
+  .agent-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+
+  /* ── Agent Card ── */
+  .agent-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .agent-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .agent-card.running::before { opacity: 1; background: linear-gradient(90deg, transparent, var(--green), transparent); }
+  .agent-card:hover { border-color: var(--accent); box-shadow: 0 0 20px var(--accent-glow); }
+  .agent-card.running { border-color: rgba(34,197,94,0.3); }
+  .agent-card.running:hover { box-shadow: 0 0 20px var(--green-glow); }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .card-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .agent-emoji {
+    font-size: 28px;
+    width: 46px;
+    height: 46px;
+    background: var(--surface2);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .agent-name { font-size: 16px; font-weight: 600; margin-bottom: 3px; }
+  .agent-category {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface2);
+    padding: 2px 8px;
+    border-radius: 10px;
+    display: inline-block;
+  }
+  .agent-description {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-bottom: 16px;
+    min-height: 38px;
+  }
+
+  /* ── Toggle ── */
+  .toggle-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+  .toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    transition: 0.3s;
+  }
+  .slider::before {
+    content: '';
+    position: absolute;
+    height: 16px; width: 16px;
+    left: 3px; bottom: 3px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    transition: 0.3s;
+  }
+  input:checked + .slider { background: rgba(34,197,94,0.25); border-color: var(--green); }
+  input:checked + .slider::before { transform: translateX(20px); background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .toggle-label { font-size: 10px; color: var(--text-muted); }
+
+  /* ── Status badge ── */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+  }
+  .status-badge.running {
+    background: var(--green-glow);
+    color: var(--green);
+    border: 1px solid rgba(34,197,94,0.3);
+  }
+  .status-badge.stopped {
+    background: rgba(100,116,139,0.1);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .status-badge.error {
+    background: var(--red-glow);
+    color: var(--red);
+    border: 1px solid rgba(239,68,68,0.3);
+  }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .running .status-dot { background: var(--green); animation: pulse 2s infinite; }
+  .stopped .status-dot { background: var(--text-muted); }
+  .error .status-dot { background: var(--red); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── Meta info ── */
+  .card-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .meta-item { font-size: 11px; }
+  .meta-label { color: var(--text-muted); margin-bottom: 2px; }
+  .meta-value { color: var(--text-dim); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; }
+
+  /* ── Tags ── */
+  .tags {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  /* ── Card actions ── */
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .btn {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--text); }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #5254c8; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Add Agent Button ── */
+  .add-card {
+    border: 2px dashed var(--border);
+    border-radius: var(--card-radius);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-muted);
+    gap: 10px;
+  }
+  .add-card:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+  .add-card .add-icon { font-size: 32px; }
+  .add-card .add-text { font-size: 14px; font-weight: 500; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    transform: translateY(20px);
+    transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-header {
+    padding: 20px 24px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .modal-title { font-size: 17px; font-weight: 700; }
+  .modal-close {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-close:hover { color: var(--text); border-color: var(--text-muted); }
+  .modal-body { padding: 0 24px 24px; }
+
+  /* ── Form ── */
+  .form-group { margin-bottom: 16px; }
+  .form-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .form-input, .form-select {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--font);
+    transition: border-color 0.2s;
+    outline: none;
+  }
+  .form-input:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .form-input::placeholder { color: var(--text-muted); }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .form-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .form-actions .btn { flex: 1; padding: 10px; font-size: 13px; }
+
+  /* ── Log Modal ── */
+  .log-modal { max-width: 680px; }
+  .log-output {
+    background: #0a0c14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #a8b5c8;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .log-output .log-error { color: #f87171; }
+  .log-output .log-warn { color: #fbbf24; }
+  .log-output .log-info { color: #60a5fa; }
+
+  /* ── Confirm Modal ── */
+  .confirm-text { font-size: 14px; color: var(--text-dim); margin-bottom: 20px; line-height: 1.6; }
+
+  /* ── Toast ── */
+  #toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 999;
+  }
+  .toast {
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid;
+    animation: slideIn 0.3s ease;
+    max-width: 320px;
+  }
+  .toast.success { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.4); color: var(--green); }
+  .toast.error { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); color: var(--red); }
+  .toast.info { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: var(--accent); }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  /* ── Loading state ── */
+  .loading-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  .skeleton {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+    animation: shimmer 1.5s infinite;
+  }
+  .skeleton-line {
+    height: 14px;
+    background: var(--surface2);
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+  @keyframes shimmer {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  /* ── Shutdown button ── */
+  .btn-shutdown {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(239,68,68,0.4);
+    background: rgba(239,68,68,0.08);
+    color: var(--red);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: all 0.2s;
+    letter-spacing: 0.2px;
+  }
+  .btn-shutdown:hover { background: rgba(239,68,68,0.18); border-color: var(--red); box-shadow: 0 0 12px var(--red-glow); }
+  .btn-shutdown:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── No script warning ── */
+  .server-warning {
+    background: rgba(245,158,11,0.1);
+    border: 1px solid rgba(245,158,11,0.3);
+    color: var(--yellow);
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .server-warning.show { display: flex; align-items: center; gap: 10px; }
+
+  /* ── PID badge ── */
+  .pid-badge {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+
+  /* ── Archived section ── */
+  .archived-section {
+    margin-top: 36px;
+  }
+  .archived-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: all 0.2s;
+  }
+  .archived-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .archived-toggle .chevron { transition: transform 0.2s; font-size: 11px; }
+  .archived-toggle.open .chevron { transform: rotate(90deg); }
+  .archived-count {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 1px 10px;
+    font-size: 11px;
+  }
+  .archived-body {
+    display: none;
+    margin-top: 16px;
+  }
+  .archived-body.open { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .archived-body .agent-card { opacity: 0.75; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  @media (max-width: 600px) {
+    header, .stats-bar, main { padding-left: 16px; padding-right: 16px; }
+    .agent-grid { grid-template-columns: 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+    .stats-bar { overflow-x: auto; flex-wrap: nowrap; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🗼</div>
+    <div>
+      <h1>Agent Control Tower</h1>
+      <span>에이전트 관리 대시보드</span>
+    </div>
+  </div>
+  <div class="header-actions">
+    <div class="server-status" id="serverStatus">
+      <div class="server-dot" id="serverDot"></div>
+      <span id="serverLabel">서버 연결 중...</span>
+    </div>
+    <button class="btn-shutdown" id="shutdownBtn" onclick="confirmShutdown()" title="모든 에이전트 + 서버 종료">
+      ⏻ 전체 종료
+    </button>
+    <span class="refresh-time" id="refreshTime"></span>
+  </div>
+</header>
+
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="stat-chip total">
+    <div class="icon">🤖</div>
+    <div>
+      <div class="label">전체 에이전트</div>
+      <div class="value" id="statTotal">—</div>
+    </div>
+  </div>
+  <div class="stat-chip running">
+    <div class="icon">🟢</div>
+    <div>
+      <div class="label">실행 중</div>
+      <div class="value" id="statRunning">—</div>
+    </div>
+  </div>
+  <div class="stat-chip stopped">
+    <div class="icon">⭕</div>
+    <div>
+      <div class="label">중지됨</div>
+      <div class="value" id="statStopped">—</div>
+    </div>
+  </div>
+  <div class="stat-chip" style="min-width:180px;">
+    <div class="icon">🕐</div>
+    <div>
+      <div class="label">마지막 갱신</div>
+      <div class="value" id="statUpdated" style="font-size:13px;color:var(--text-dim)">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<main>
+  <!-- Server warning -->
+  <div class="server-warning" id="serverWarning">
+    <span>⚠️</span>
+    <div>
+      서버가 연결되지 않았습니다. 터미널에서 <code style="background:rgba(0,0,0,0.3);padding:1px 6px;border-radius:4px;">python3 server.py</code>를 먼저 실행해주세요.
+      (agent_control tower 폴더에서)
+    </div>
+  </div>
+
+  <!-- Section header -->
+  <div class="section-header">
+    <span class="section-title">에이전트 목록</span>
+    <div class="filters" id="categoryFilters">
+      <button class="filter-btn active" onclick="setFilter('all', this)">전체</button>
+      <button class="filter-btn" onclick="setFilter('monitoring', this)">모니터링</button>
+      <button class="filter-btn" onclick="setFilter('research', this)">리서치</button>
+      <button class="filter-btn" onclick="setFilter('productivity', this)">생산성</button>
+      <button class="filter-btn" onclick="setFilter('utility', this)">유틸리티</button>
+      <button class="filter-btn" onclick="setFilter('ai', this)">AI</button>
+    </div>
+  </div>
+
+  <!-- Agent Grid -->
+  <div class="agent-grid" id="agentGrid">
+    <!-- skeleton -->
+    <div class="skeleton">
+      <div class="skeleton-line" style="width:60%;height:20px;"></div>
+      <div class="skeleton-line" style="width:100%;margin-top:16px;"></div>
+      <div class="skeleton-line" style="width:80%;"></div>
+    </div>
+    <div class="skeleton">
+      <div class="skeleton-line" style="width:60%;height:20px;"></div>
+      <div class="skeleton-line" style="width:100%;margin-top:16px;"></div>
+      <div class="skeleton-line" style="width:80%;"></div>
+    </div>
+  </div>
+
+  <!-- Archived (종료) Section -->
+  <div class="archived-section">
+    <button class="archived-toggle" id="archivedToggle" onclick="toggleArchived()">
+      <span class="chevron">▶</span>
+      <span>종료된 에이전트</span>
+      <span class="archived-count" id="archivedCount">0</span>
+    </button>
+    <div class="archived-body" id="archivedGrid"></div>
+  </div>
+</main>
+
+<!-- ── Add Agent Modal ── -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">새 에이전트 추가</div>
+      <button class="modal-close" onclick="closeModal('addModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">ID <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="f-id" placeholder="my_bot" />
+          <div class="form-hint">영문, 숫자, 언더바</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">이모지</label>
+          <input class="form-input" id="f-emoji" placeholder="🤖" maxlength="2" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">이름 <span style="color:var(--red)">*</span></label>
+        <input class="form-input" id="f-name" placeholder="내 봇" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">설명</label>
+        <input class="form-input" id="f-description" placeholder="이 에이전트가 하는 일..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label">디렉토리 경로 <span style="color:var(--red)">*</span></label>
+        <input class="form-input" id="f-dir" placeholder="../agent_my_bot 또는 절대경로" />
+        <div class="form-hint">control tower 폴더 기준 상대경로 또는 절대경로</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">진입점 스크립트 <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="f-script" placeholder="main.py" value="main.py" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">카테고리</label>
+          <select class="form-select" id="f-category">
+            <option value="general">general</option>
+            <option value="monitoring">monitoring</option>
+            <option value="research">research</option>
+            <option value="productivity">productivity</option>
+            <option value="utility">utility</option>
+            <option value="ai">ai</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">태그</label>
+        <input class="form-input" id="f-tags" placeholder="telegram, ai, automation (쉼표로 구분)" />
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('addModal')">취소</button>
+        <button class="btn primary" onclick="submitAddAgent()">추가하기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Log Modal ── -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal log-modal">
+    <div class="modal-header">
+      <div class="modal-title" id="logModalTitle">로그</div>
+      <button class="modal-close" onclick="closeModal('logModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+        <button class="btn" style="flex:0;padding:6px 14px;font-size:11px;" onclick="refreshLog()">🔄 새로고침</button>
+      </div>
+      <div class="log-output" id="logOutput">로그 불러오는 중...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Confirm Modal ── -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal" style="max-width:380px;">
+    <div class="modal-header">
+      <div class="modal-title" id="confirmTitle">확인</div>
+      <button class="modal-close" onclick="closeModal('confirmModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text" id="confirmText"></p>
+      <div class="form-actions">
+        <button class="btn" onclick="closeModal('confirmModal')">취소</button>
+        <button class="btn danger" id="confirmOkBtn" style="border-color:var(--red);color:var(--red);">삭제</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+const API = 'http://127.0.0.1:8765';
+let agents = [];
+let activeFilter = 'all';
+let currentLogId = null;
+let refreshInterval = null;
+let serverConnected = false;
+
+// ── Category labels ──
+const CATEGORY_KR = {
+  monitoring: '모니터링',
+  research: '리서치',
+  productivity: '생산성',
+  utility: '유틸리티',
+  ai: 'AI',
+  general: '일반',
+};
+
+// ── API calls ──
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const r = await fetch(API + path, opts);
+    return await r.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function checkServer() {
+  const r = await api('GET', '/api/ping');
+  const dot = document.getElementById('serverDot');
+  const label = document.getElementById('serverLabel');
+  const warning = document.getElementById('serverWarning');
+  if (r && r.ok) {
+    dot.classList.add('connected');
+    label.textContent = '서버 연결됨';
+    warning.classList.remove('show');
+    if (!serverConnected) {
+      serverConnected = true;
+      loadAgents();
+    }
+  } else {
+    dot.classList.remove('connected');
+    label.textContent = '서버 없음';
+    warning.classList.add('show');
+    serverConnected = false;
+  }
+}
+
+async function loadAgents() {
+  const data = await api('GET', '/api/agents');
+  if (!data) { checkServer(); return; }
+  agents = data;
+  renderGrid();
+  updateStats();
+  document.getElementById('refreshTime').textContent =
+    '갱신: ' + new Date().toLocaleTimeString('ko-KR');
+  document.getElementById('statUpdated').textContent =
+    new Date().toLocaleTimeString('ko-KR');
+}
+
+// ── Stats ── (실행 그룹 기준)
+function updateStats() {
+  const active = agents.filter(a => (a.group || 'active') === 'active');
+  const running = active.filter(a => a.running).length;
+  document.getElementById('statTotal').textContent = active.length;
+  document.getElementById('statRunning').textContent = running;
+  document.getElementById('statStopped').textContent = active.length - running;
+}
+
+// ── Filter ──
+function setFilter(cat, btn) {
+  activeFilter = cat;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGrid();
+}
+
+// ── Render ──
+function renderGrid() {
+  const grid = document.getElementById('agentGrid');
+  const active = agents.filter(a => (a.group || 'active') === 'active');
+  const filtered = activeFilter === 'all' ? active : active.filter(a => a.category === activeFilter);
+
+  const cards = filtered.map(a => agentCard(a)).join('');
+  grid.innerHTML = cards + addCard();
+
+  renderArchived();
+}
+
+function renderArchived() {
+  const archived = agents.filter(a => (a.group || 'active') === 'archived');
+  const filtered = activeFilter === 'all' ? archived : archived.filter(a => a.category === activeFilter);
+
+  document.getElementById('archivedCount').textContent = filtered.length;
+  document.getElementById('archivedGrid').innerHTML = filtered.map(a => agentCard(a)).join('');
+}
+
+function toggleArchived() {
+  document.getElementById('archivedToggle').classList.toggle('open');
+  document.getElementById('archivedGrid').classList.toggle('open');
+}
+
+function agentCard(a) {
+  const statusClass = a.running ? 'running' : (a.script_exists ? 'stopped' : 'error');
+  const statusLabel = a.running ? '실행 중' : (a.script_exists ? '중지됨' : '스크립트 없음');
+  const pid = a.running ? `<span class="pid-badge">PID ${a.pid}</span>` : '';
+  const tags = (a.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+  const lastRun = a.last_run || '기록 없음';
+  const dirShort = a.dir ? a.dir.split('/').slice(-2).join('/') : '—';
+  const catKr = CATEGORY_KR[a.category] || a.category;
+
+  return `
+  <div class="agent-card ${a.running ? 'running' : ''}" id="card-${a.id}">
+    <div class="card-top">
+      <div class="card-identity">
+        <div class="agent-emoji">${a.emoji}</div>
+        <div>
+          <div class="agent-name">${a.name}</div>
+          <span class="agent-category">${catKr}</span>
+        </div>
+      </div>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" ${a.running ? 'checked' : ''}
+            onchange="toggleAgent('${a.id}', this.checked, this)"
+            ${!a.script_exists ? 'disabled' : ''}>
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label">${a.running ? 'ON' : 'OFF'}</span>
+      </div>
+    </div>
+
+    <p class="agent-description">${a.description || '설명 없음'}</p>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <span class="status-badge ${statusClass}">
+        <span class="status-dot"></span>${statusLabel}
+      </span>
+      ${pid}
+    </div>
+
+    <div class="card-meta">
+      <div class="meta-item">
+        <div class="meta-label">마지막 실행</div>
+        <div class="meta-value">${lastRun}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">경로</div>
+        <div class="meta-value" title="${a.dir}">…/${dirShort}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">스크립트</div>
+        <div class="meta-value">${a.script_exists ? '✓ 있음' : '✗ 없음'}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">ID</div>
+        <div class="meta-value">${a.id}</div>
+      </div>
+    </div>
+
+    ${tags ? `<div class="tags">${tags}</div>` : ''}
+
+    <div class="card-actions">
+      <button class="btn" onclick="openLogs('${a.id}', '${a.name}')">📋 로그</button>
+      <button class="btn danger" onclick="confirmDelete('${a.id}', '${a.name}')">🗑 삭제</button>
+    </div>
+  </div>`;
+}
+
+function addCard() {
+  return `
+  <div class="add-card" onclick="openModal('addModal')">
+    <div class="add-icon">➕</div>
+    <div class="add-text">새 에이전트 추가</div>
+    <div style="font-size:12px;color:var(--text-muted);">agents.json에 등록</div>
+  </div>`;
+}
+
+// ── Toggle (start/stop) ──
+async function toggleAgent(id, shouldRun, checkbox) {
+  checkbox.disabled = true;
+  const action = shouldRun ? 'start' : 'stop';
+  const r = await api('POST', `/api/agents/${id}/${action}`);
+  checkbox.disabled = false;
+
+  if (!r) { toast('서버 연결 실패', 'error'); checkbox.checked = !shouldRun; return; }
+  if (r.ok) {
+    toast(r.message, 'success');
+    await loadAgents();
+  } else {
+    toast(r.message, 'error');
+    checkbox.checked = !shouldRun;
+  }
+}
+
+// ── Logs ──
+async function openLogs(id, name) {
+  currentLogId = id;
+  document.getElementById('logModalTitle').textContent = `${name} — 로그`;
+  document.getElementById('logOutput').textContent = '불러오는 중...';
+  openModal('logModal');
+  const text = await fetch(`${API}/api/agents/${id}/logs`).then(r => r.text()).catch(() => '서버 연결 실패');
+  renderLog(text);
+}
+
+async function refreshLog() {
+  if (!currentLogId) return;
+  document.getElementById('logOutput').textContent = '새로고침 중...';
+  const text = await fetch(`${API}/api/agents/${currentLogId}/logs`).then(r => r.text()).catch(() => '서버 연결 실패');
+  renderLog(text);
+}
+
+function renderLog(text) {
+  const el = document.getElementById('logOutput');
+  if (!text.trim()) { el.textContent = '로그 없음'; return; }
+  // Colorize
+  const lines = text.split('\n').map(line => {
+    if (/error|exception|traceback|critical/i.test(line)) return `<span class="log-error">${esc(line)}</span>`;
+    if (/warn|warning/i.test(line)) return `<span class="log-warn">${esc(line)}</span>`;
+    if (/info|started|starting|running/i.test(line)) return `<span class="log-info">${esc(line)}</span>`;
+    return esc(line);
+  });
+  el.innerHTML = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Add Agent ──
+function openAddModal() { openModal('addModal'); }
+
+async function submitAddAgent() {
+  const id = document.getElementById('f-id').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  const dir = document.getElementById('f-dir').value.trim();
+  const script = document.getElementById('f-script').value.trim();
+
+  if (!id || !name || !dir || !script) { toast('필수 항목을 모두 입력해주세요', 'error'); return; }
+
+  const tags = document.getElementById('f-tags').value
+    .split(',').map(t => t.trim()).filter(Boolean);
+
+  const r = await api('POST', '/api/agents', {
+    id, name,
+    emoji: document.getElementById('f-emoji').value.trim() || '🤖',
+    description: document.getElementById('f-description').value.trim(),
+    dir, script,
+    category: document.getElementById('f-category').value,
+    tags,
+  });
+
+  if (!r) { toast('서버 연결 실패', 'error'); return; }
+  if (r.ok) {
+    toast(`'${name}' 추가됨`, 'success');
+    closeModal('addModal');
+    clearAddForm();
+    await loadAgents();
+  } else {
+    toast(r.message, 'error');
+  }
+}
+
+function clearAddForm() {
+  ['f-id','f-name','f-emoji','f-description','f-dir','f-tags'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('f-script').value = 'main.py';
+  document.getElementById('f-category').value = 'general';
+}
+
+// ── Delete ──
+function confirmDelete(id, name) {
+  document.getElementById('confirmTitle').textContent = '에이전트 삭제';
+  document.getElementById('confirmText').textContent =
+    `'${name}'을(를) 목록에서 삭제할까요?\n실행 중이라면 함께 종료됩니다.`;
+  const btn = document.getElementById('confirmOkBtn');
+  btn.onclick = async () => {
+    const r = await api('DELETE', `/api/agents/${id}`);
+    closeModal('confirmModal');
+    if (!r) { toast('서버 연결 실패', 'error'); return; }
+    if (r.ok) { toast('삭제됨', 'success'); await loadAgents(); }
+    else toast(r.message, 'error');
+  };
+  openModal('confirmModal');
+}
+
+// ── Modal helpers ──
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// ── Toast ──
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── Shutdown ──
+function confirmShutdown() {
+  document.getElementById('confirmTitle').textContent = '전체 종료';
+  document.getElementById('confirmText').textContent =
+    '실행 중인 모든 에이전트와 Control Tower 서버를 종료합니다.\n다시 사용하려면 launch.sh를 다시 실행해야 합니다.';
+  const btn = document.getElementById('confirmOkBtn');
+  btn.textContent = '전체 종료';
+  btn.style.color = 'var(--red)';
+  btn.style.borderColor = 'var(--red)';
+  btn.onclick = async () => {
+    closeModal('confirmModal');
+    const shutdownBtn = document.getElementById('shutdownBtn');
+    shutdownBtn.disabled = true;
+    shutdownBtn.textContent = '⏻ 종료 중...';
+    clearInterval(refreshInterval);
+    try {
+      await fetch(`${API}/api/shutdown`, { method: 'GET' });
+    } catch (_) {}
+    toast('모든 에이전트와 서버가 종료됐습니다', 'info');
+    setTimeout(() => {
+      document.getElementById('serverDot').classList.remove('connected');
+      document.getElementById('serverLabel').textContent = '서버 종료됨';
+      serverConnected = false;
+      shutdownBtn.textContent = '⏻ 종료됨';
+      agents = [];
+      renderGrid();
+      updateStats();
+    }, 800);
+  };
+  openModal('confirmModal');
+}
+
+// ── Init ──
+async function init() {
+  await checkServer();
+  refreshInterval = setInterval(async () => {
+    await checkServer();
+    if (serverConnected) await loadAgents();
+  }, 5000);
+}
+
+init();
+</script>
+</body>
+</html>
