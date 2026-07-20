@@ -1,6 +1,5 @@
 .env
 credentials.json
-my_card.jpg
 nohup.out
 __pycache__/
 *.pyc
