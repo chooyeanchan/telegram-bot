@@ -72,7 +72,7 @@
   ```
 
 #### F3. 로컬 파일 저장
-- 저장 경로: `/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/inbox`
+- 저장 경로: `.env`의 `ICLOUD_PATH` (기본값: `/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/inbox`)
 - 파일명 규칙: `YYMMDD 주제.md` (예: `260614 양자컴퓨터 최신동향.md`)
 - 저장 완료 후 텔레그램으로 파일 경로 + 3줄 요약 알림
 

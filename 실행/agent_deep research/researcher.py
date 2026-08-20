@@ -2,10 +2,13 @@ import os
 import re
 import asyncio
 from datetime import datetime
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-SAVE_PATH = "/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/inbox"
+load_dotenv()
+
+SAVE_PATH = os.environ["ICLOUD_PATH"]
 
 RESEARCH_PROMPT = """
 당신은 전문 리서처입니다. 아래 주제를 한국어로 상세히 조사하여 마크다운 문서를 작성해주세요.
