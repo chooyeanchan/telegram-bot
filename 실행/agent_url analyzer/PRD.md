@@ -100,7 +100,7 @@ tags: [{{자동 태그}}]
 
 ## 저장 경로
 
-- 기본 경로: `/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/1_inbox/`
+- 기본 경로: `/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/inbox/`
 - 하위 폴더 (선택 v2): `youtube/`, `blog/`, `news/`, `pdf/`
 
 ---

@@ -5,7 +5,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
-SAVE_PATH = "/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/1_inbox"
+SAVE_PATH = "/Users/chooyeanchan/Library/Mobile Documents/iCloud~md~obsidian/Documents/chooyeanchan_icloud/1.0_llm wiki/inbox"
 
 RESEARCH_PROMPT = """
 당신은 전문 리서처입니다. 아래 주제를 한국어로 상세히 조사하여 마크다운 문서를 작성해주세요.
