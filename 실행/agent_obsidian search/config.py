@@ -28,6 +28,33 @@ CHUNK_CHARS = 800      # 청크 최대 길이(문자)
 TOP_K = 5              # 답변에 넘길 청크 수
 DB_PATH = os.path.join(BASE_DIR, "data", "index.db")
 
+
+# 폴더별 노트 목적 설명 (folders.json, 없으면 예시 파일)
+def _load_folders():
+    import json
+
+    path = os.path.join(BASE_DIR, "folders.json")
+    if not os.path.exists(path):
+        path = os.path.join(BASE_DIR, "folders.example.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+FOLDERS = _load_folders()
+
+
+def folder_of(rel_path):
+    """노트 경로에 해당하는 가장 구체적인 폴더 키와 설명."""
+    best = ""
+    for key in FOLDERS:
+        if rel_path.startswith(key + "/") and len(key) > len(best):
+            best = key
+    return best, FOLDERS.get(best, "")
+
 # 텔레그램 (봇 실행 시에만 필요)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ALLOWED_CHAT_ID = int(os.environ.get("ALLOWED_CHAT_ID", "0") or 0)

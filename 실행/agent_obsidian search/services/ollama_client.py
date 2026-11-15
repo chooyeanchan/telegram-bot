@@ -14,17 +14,16 @@ def embed(texts):
     return r.json()["embeddings"]
 
 
-def chat(messages, think=False):
-    r = requests.post(
-        f"{config.OLLAMA_URL}/api/chat",
-        json={
-            "model": config.CHAT_MODEL,
-            "messages": messages,
-            "stream": False,
-            "think": think,
-            "options": {"num_ctx": 8192, "temperature": 0.3},
-        },
-        timeout=600,
-    )
+def chat(messages, think=False, json_mode=False, temperature=0.3):
+    body = {
+        "model": config.CHAT_MODEL,
+        "messages": messages,
+        "stream": False,
+        "think": think,
+        "options": {"num_ctx": 8192, "temperature": temperature},
+    }
+    if json_mode:
+        body["format"] = "json"
+    r = requests.post(f"{config.OLLAMA_URL}/api/chat", json=body, timeout=600)
     r.raise_for_status()
     return r.json()["message"]["content"]

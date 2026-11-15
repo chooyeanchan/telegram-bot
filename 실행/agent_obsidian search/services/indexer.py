@@ -82,8 +82,15 @@ def chunk_note(rel, text):
                 buf = buf[config.CHUNK_CHARS :]
         if buf.strip():
             chunks.append((heading, buf))
-    # 임베딩 문맥을 위해 노트 제목/섹션 제목을 앞에 붙인다
-    return [(h, f"[{title}] {h}\n{c}".strip()) for h, c in chunks if len(c.strip()) > 20]
+    # 임베딩 문맥을 위해 폴더 경로(예: yearly goals, sora letter)와 제목을 앞에 붙인다
+    folder = " / ".join(
+        re.sub(r"^[\d.]+_", "", p) for p in os.path.dirname(rel).split(os.sep) if p
+    )
+    _, purpose = config.folder_of(rel)
+    prefix = f"[{folder} / {title}]" if folder else f"[{title}]"
+    if purpose:
+        prefix = f"[분류: {purpose}] {prefix}"
+    return [(h, f"{prefix} {h}\n{c}".strip()) for h, c in chunks if len(c.strip()) > 20]
 
 
 def update_index(progress=None):

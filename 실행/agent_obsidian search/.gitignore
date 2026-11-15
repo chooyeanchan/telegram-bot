@@ -1,2 +1,4 @@
 data/
 bot.pid
+# 개인 정보가 담긴 폴더 설명 (예시는 folders.example.json)
+folders.json

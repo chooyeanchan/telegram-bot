@@ -75,7 +75,7 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sources = "\n".join(
             f"• {os.path.splitext(p)[0]}" for p in dict.fromkeys(h["path"] for h in hits)
         )
-        text = f"{reply}\n\n📎 출처\n{sources}" if sources else reply
+        text = f"✅ {reply}\n\n📎 출처\n{sources}" if sources else f"✅ {reply}"
         await msg.edit_text(text[:4000])
     except Exception as e:
         logger.exception("답변 실패")
