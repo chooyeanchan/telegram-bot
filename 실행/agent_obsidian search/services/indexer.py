@@ -1,0 +1,129 @@
+"""볼트의 .md 노트를 청크로 나누고 임베딩해서 SQLite에 저장한다.
+수정 시간이 바뀐 노트만 다시 처리한다(증분 인덱싱)."""
+import logging
+import os
+import re
+import sqlite3
+import unicodedata
+
+import numpy as np
+
+import config
+from services.ollama_client import embed
+
+logger = logging.getLogger(__name__)
+
+FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
+HEADING = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
+
+
+def connect():
+    os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
+    db = sqlite3.connect(config.DB_PATH)
+    db.execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime REAL)")
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS chunks ("
+        " id INTEGER PRIMARY KEY, path TEXT, heading TEXT, text TEXT, vec BLOB)"
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path)")
+    return db
+
+
+def _excluded(rel):
+    parts = rel.split(os.sep)
+    for ex in config.EXCLUDE_DIRS:
+        ex_parts = ex.strip("/").split("/")
+        if parts[: len(ex_parts)] == ex_parts:
+            return True
+    return any(p.startswith(".") for p in parts)
+
+
+def list_notes():
+    notes = {}
+    for root, dirs, files in os.walk(config.VAULT_PATH):
+        rel_root = os.path.relpath(root, config.VAULT_PATH)
+        rel_root = "" if rel_root == "." else rel_root
+        dirs[:] = [d for d in dirs if not _excluded(os.path.join(rel_root, d))]
+        for f in files:
+            if not f.endswith(".md"):
+                continue
+            rel = os.path.join(rel_root, f)
+            if _excluded(rel):
+                continue
+            full = os.path.join(root, f)
+            # macOS 파일명은 NFD(자모 분리)일 수 있어 NFC로 통일해 저장한다
+            notes[unicodedata.normalize("NFC", rel)] = (os.path.getmtime(full), full)
+    return notes
+
+
+def chunk_note(rel, text):
+    """제목(heading) 단위로 나누고, 긴 섹션은 문단 기준으로 다시 자른다."""
+    text = FRONTMATTER.sub("", text)
+    title = os.path.splitext(os.path.basename(rel))[0]
+    sections, last, heading = [], 0, ""
+    for m in HEADING.finditer(text):
+        sections.append((heading, text[last : m.start()]))
+        heading, last = m.group(2).strip(), m.start()
+    sections.append((heading, text[last:]))
+
+    chunks = []
+    for heading, body in sections:
+        body = body.strip()
+        if not body:
+            continue
+        buf = ""
+        for para in re.split(r"\n\s*\n", body):
+            if buf and len(buf) + len(para) > config.CHUNK_CHARS:
+                chunks.append((heading, buf))
+                buf = ""
+            buf = f"{buf}\n\n{para}" if buf else para
+            while len(buf) > config.CHUNK_CHARS * 1.5:
+                chunks.append((heading, buf[: config.CHUNK_CHARS]))
+                buf = buf[config.CHUNK_CHARS :]
+        if buf.strip():
+            chunks.append((heading, buf))
+    # 임베딩 문맥을 위해 노트 제목/섹션 제목을 앞에 붙인다
+    return [(h, f"[{title}] {h}\n{c}".strip()) for h, c in chunks if len(c.strip()) > 20]
+
+
+def update_index(progress=None):
+    """변경된 노트만 다시 인덱싱. (추가, 갱신, 삭제) 개수를 돌려준다."""
+    db = connect()
+    current = list_notes()
+    known = dict(db.execute("SELECT path, mtime FROM files"))
+
+    removed = [p for p in known if p not in current]
+    changed = [p for p, (mt, _) in current.items() if known.get(p) != mt]
+
+    for p in removed:
+        db.execute("DELETE FROM chunks WHERE path=?", (p,))
+        db.execute("DELETE FROM files WHERE path=?", (p,))
+    db.commit()
+
+    for i, rel in enumerate(changed, 1):
+        try:
+            with open(current[rel][1], encoding="utf-8") as f:
+                text = unicodedata.normalize("NFC", f.read())
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning(f"읽기 실패 {rel}: {e}")
+            continue
+        chunks = chunk_note(rel, text)
+        vecs = []
+        for b in range(0, len(chunks), 16):
+            vecs += embed([c for _, c in chunks[b : b + 16]])
+        db.execute("DELETE FROM chunks WHERE path=?", (rel,))
+        db.executemany(
+            "INSERT INTO chunks (path, heading, text, vec) VALUES (?,?,?,?)",
+            [
+                (rel, h, c, np.asarray(v, dtype=np.float32).tobytes())
+                for (h, c), v in zip(chunks, vecs)
+            ],
+        )
+        db.execute("INSERT OR REPLACE INTO files VALUES (?,?)", (rel, current[rel][0]))
+        db.commit()
+        if progress:
+            progress(i, len(changed), rel)
+
+    new = sum(1 for p in changed if p not in known)
+    db.close()
+    return new, len(changed) - new, len(removed)
