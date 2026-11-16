@@ -14,13 +14,25 @@ import config
 from services.indexer import connect
 from services.ollama_client import chat, embed
 
-SYSTEM_PROMPT = """너는 사용자의 옵시디언 노트를 검색해 주는 비서다.
-오늘 날짜는 {today}이다.
-- 반드시 아래 [노트] 내용만 근거로 한국어로 답한다.
-- 질문에 맞는 노트가 여러 개면 날짜와 질문 조건(연도, 시기)에 가장 맞는 노트를 우선한다.
-- 노트에 답이 없으면 "노트에서 찾지 못했어요"라고 말하고 추측하지 않는다.
-- 근거가 된 노트는 === 사이에 적힌 실제 제목 그대로 [[제목]] 형식으로 언급한다. "노트 1" 같은 번호로 부르지 않는다.
-- 답변에 === 표시나 폴더 경로는 쓰지 않는다. 노트를 나열할 때는 "- [[제목]]: 한 줄 요약" 형식으로 쓴다."""
+SYSTEM_PROMPT = """너는 사용자의 옵시디언 노트에서 답을 찾아 주는 비서다. 오늘 날짜는 {today}이다.
+
+[규칙]
+- 아래 [노트] 내용만 근거로, 한국어 존댓말(~요)로 짧고 정확하게 답한다. 노트에 없는 내용은 지어내지 않는다.
+- [노트]에는 검색이 잘못 가져온 무관한 노트도 섞여 있다. 질문 주제를 직접 다루는 노트만 쓰고, 단어만 겹치는 노트(예: 질문 단어를 예시로 언급한 작업 로그)는 언급하지 않는다.
+- 날짜 조건이 있으면 그 기간 노트만 쓴다.
+- 질문 대상이 여럿이면(예: 부모님 → 어머니·아버지·장인·장모) 노트에 있는 대상을 빠짐없이 답한다.
+- 숫자·날짜는 노트에 적힌 의미 그대로 옮긴다(예: 생일과 환갑 날짜를 섞지 않는다).
+- 답이 없으면 "노트에서 찾지 못했어요." 한 줄만 쓴다.
+- 노트를 언급할 때는 === 사이에 적힌 제목을 앞의 날짜 숫자까지 글자 그대로 [[제목]]으로 쓴다.
+
+[형식]
+1. 첫 문단: 질문에 대한 핵심 답을 1~2문장으로.
+2. 빈 줄 하나 뒤에 근거 노트를 "- [[제목]]: 한 줄 요약" 목록으로 (관련 노트만, 최대 5개, 날짜순).
+3. 전체 10줄 이내. 인사말, 맺음말, 마크다운 제목(#), 굵게(**), === 표시, 폴더 경로는 쓰지 않는다."""
+
+MAX_NOTES = 6          # 답변에 넘길 최대 노트 수
+MAX_CONTEXT = 5000     # 답변에 넘길 본문 최대 길이(문자). 길수록 느려진다
+SCORE_GAP = 0.2        # 1등과 점수 차이가 이보다 크면 관련 없는 노트로 본다
 
 # 검색 품질을 떨어뜨리는 말투/요청 표현 (임베딩·키워드 매칭에서 제거)
 FILLER = re.compile(
@@ -288,35 +300,97 @@ def _label(path):
     title = os.path.splitext(os.path.basename(path))[0]
     d = note_date(path)
     when = (f"{d[0]}년 {d[1]}월" if d[1] else f"{d[0]}년") if d else "날짜 모름"
-    return f"=== [[{title}]] ({when}, {os.path.dirname(path)}) ==="
+    # 폴더 경로 대신 폴더의 목적(예: "소라가 나에게 쓴 편지")을 줘야 LLM이 노트 성격을 구분한다
+    _, purpose = config.folder_of(path)
+    return f"=== [[{title}]] ({when}, {purpose or os.path.dirname(path)}) ==="
+
+
+def _title(path):
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def _norm_title(t):
+    """제목 비교용: 앞의 날짜(260820)·공백·기호를 빼고 소문자로."""
+    t = re.sub(r"^\d{6}[\s_\-]*", "", t.strip())
+    return re.sub(r"[\s_\-—–·,.()\[\]'\"]+", "", t).lower()
+
+
+def _resolve(name, notes):
+    """LLM이 쓴 [[제목]]을 실제 노트로 연결한다. LLM은 날짜를 빼먹거나 살짝 바꿔 쓰기 때문에
+    글자 그대로 비교하지 않고 정규화한 제목으로, 그래도 없으면 포함 관계로 찾는다."""
+    n = _norm_title(name)
+    if not n:
+        return None
+    for note in notes:
+        if _norm_title(_title(note["path"])) == n:
+            return note
+    for note in notes:
+        t = _norm_title(_title(note["path"]))
+        if len(n) >= 4 and len(t) >= 4 and (n in t or t in n):
+            return note
+    return None
+
+
+def _group_by_note(hits):
+    """청크 단위 결과를 노트 단위로 묶는다 (점수 높은 노트 순)."""
+    notes = {}
+    for h in hits:
+        n = notes.setdefault(h["path"], {"path": h["path"], "score": h["score"], "chunks": []})
+        n["chunks"].append(h["text"])
+    return list(notes.values())
 
 
 def answer(query):
-    hits = search(query)
+    hits = search(query, k=MAX_NOTES * 2)
     if not hits:
         return "인덱스가 비어 있어요. 먼저 인덱싱을 실행해 주세요.", []
-    # 1등과 점수 차이가 큰 노트는 관련 없는 것으로 보고 뺀다 (출처 목록도 깔끔하게)
-    hits = [h for h in hits if h["score"] >= hits[0]["score"] - 0.2]
-    context = "\n\n".join(f"{_label(h['path'])}\n{h['text']}" for h in hits)
+    # 1등과 점수 차이가 큰 노트는 관련 없는 것으로 보고 뺀다
+    notes = [n for n in _group_by_note(hits) if n["score"] >= hits[0]["score"] - SCORE_GAP][:MAX_NOTES]
+
+    # 노트마다 가장 관련 높은 청크를 먼저 넣고, 길이 여유가 있으면 두 번째 청크를 더한다
+    # → 한 노트가 문맥을 독차지해서 다른 관련 노트가 빠지는 일을 막는다
+    budget = MAX_CONTEXT
+    for n in notes:
+        n["use"] = [n["chunks"][0][: max(budget, 300)]]
+        budget -= len(n["use"][0])
+    for n in notes:
+        if len(n["chunks"]) > 1 and budget > 300:
+            n["use"].append(n["chunks"][1][:budget])
+            budget -= len(n["use"][-1])
+
     cond = parse_date_query(query)
+    if cond:  # 기간을 묻는 질문은 날짜순으로 넘겨야 LLM도 날짜순으로 정리한다
+        notes.sort(key=lambda n: _sort_date(n["path"]))
+    context = "\n\n".join(f"{_label(n['path'])}\n" + "\n…\n".join(n["use"]) for n in notes)
     if cond:
         y = ", ".join(f"{v}년" for v in sorted(cond[0]))
         m = ", ".join(f"{v}월" for v in sorted(cond[1]))
-        context = f"(질문의 날짜 조건: {y} {m}. 이 기간 노트를 모두 고려할 것)\n\n" + context
+        context = f"(질문의 날짜 조건: {y} {m})\n\n" + context
+
     reply = chat(
         [
             {"role": "system", "content": SYSTEM_PROMPT.format(today=date.today().isoformat())},
             {"role": "user", "content": f"[노트]\n{context}\n\n[질문]\n{query}"},
         ]
     )
-    # 내부용 라벨(=== [[제목]] (날짜, 폴더) ===)이 답변에 새어 나오면 지운다
-    reply = re.sub(r"^\s*===.*?===\s*$", "", reply, flags=re.M).strip()
-    # 출처는 답변이 실제로 [[제목]]으로 언급한 노트만 보여준다 (언급이 없으면 상위 노트만)
-    cited = [h for h in hits if f"[[{os.path.splitext(os.path.basename(h['path']))[0]}]]" in reply]
-    if cited:
-        hits = cited
-    elif "찾지 못했" in reply:
-        hits = []
-    else:
-        hits = [h for h in hits if h["path"] == hits[0]["path"]]
-    return reply, hits
+    # 내부용 라벨(=== [[제목]] (날짜, 폴더) ===)이나 마크다운 장식이 새어 나오면 지운다
+    reply = re.sub(r"^\s*===.*?===\s*$", "", reply, flags=re.M)
+    reply = re.sub(r"^\s*#+\s*", "", reply, flags=re.M)
+    reply = reply.replace("**", "")
+    reply = re.sub(r"\n{3,}", "\n\n", reply).strip()
+
+    # [[제목]]을 실제 노트 제목으로 고치고, 언급된 노트만 출처로 남긴다
+    cited = []
+
+    def fix(m):
+        note = _resolve(m.group(1), notes)
+        if not note:
+            return m.group(1)  # 목록에 없는 노트를 지어낸 경우: 링크 표시 없이 글자만
+        if note not in cited:
+            cited.append(note)
+        return f"[[{_title(note['path'])}]]"
+
+    reply = re.sub(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]", fix, reply)
+    if not cited and "찾지 못했" not in reply:
+        cited = notes[:1]
+    return reply, [{"path": n["path"], "score": n["score"]} for n in cited]

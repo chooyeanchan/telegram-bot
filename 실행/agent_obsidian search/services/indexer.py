@@ -133,7 +133,12 @@ def chunk_note(rel, text):
     prefix = f"[{folder} / {title}]" if folder else f"[{title}]"
     if purpose:
         prefix = f"[분류: {purpose}] {prefix}"
-    return [(h, f"{prefix} {h}\n{c}".strip()) for h, c in chunks if len(c.strip()) > 20]
+    out = [(h, f"{prefix} {h}\n{c}".strip()) for h, c in chunks if len(c.strip()) > 20]
+    if not out:
+        # 이미지만 있는 노트(손편지 사진 등)는 본문이 비어 검색에서 아예 사라진다
+        # → 제목과 폴더만이라도 담은 청크를 만들어 제목으로는 찾을 수 있게 한다
+        out = [("", f"{prefix}\n{title} (이 노트는 이미지나 첨부만 있고 본문 글은 없음)")]
+    return out
 
 
 def update_index(progress=None):
@@ -151,6 +156,13 @@ def update_index(progress=None):
         changed = list(current)
     else:
         changed = [p for p, (mt, _) in current.items() if known.get(p) != mt]
+        # 청크가 하나도 없는 노트(예전 규칙에서 빈 노트로 처리된 것)도 다시 만든다
+        empty = {
+            p for (p,) in db.execute(
+                "SELECT path FROM files f WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.path=f.path)"
+            )
+        }
+        changed += [p for p in current if p in empty and p not in changed]
     for p in removed:
         db.execute("DELETE FROM chunks WHERE path=?", (p,))
         db.execute("DELETE FROM files WHERE path=?", (p,))
