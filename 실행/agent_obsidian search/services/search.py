@@ -151,21 +151,90 @@ def _keywords(q):
     return [w for w in q.split() if len(w) >= 2]
 
 
+# ---------- 키워드 검색 (BM25) ----------
+# 임베딩은 '맥켈란', 'AZ-900', '홈플러스' 같은 고유명사를 잘 못 잡는다.
+# 한국어는 조사가 붙으므로(제주도에서, 제주도의) 단어를 2글자씩 쪼갠 bigram으로 맞춘다.
+
+W_LEX = 0.25     # 키워드 점수(0~1) 가중치
+W_TITLE = 0.15   # 제목에 질문 단어가 들어 있을 때 가중치
+W_FOLDER = 0.05  # LLM이 고른 폴더의 노트 가산점 (LLM이 자주 틀리므로 너무 크면 안 된다)
+LATEST_WORDS = re.compile(r"(최근|최신|마지막|요즘|가장\s*늦|제일\s*늦|latest)")
+
+
+def _tokens(text):
+    out = []
+    for w in re.findall(r"[0-9a-z]+(?:-[0-9a-z]+)*|[가-힣]+", text.lower()):
+        if re.match(r"[가-힣]", w):
+            out += [w[i : i + 2] for i in range(len(w) - 1)] if len(w) >= 2 else []
+        elif len(w) >= 2:
+            out.append(w)
+    return out
+
+
+class _Index:
+    def __init__(self, rows):
+        from collections import Counter, defaultdict
+
+        self.rows = rows
+        mat = np.vstack([np.frombuffer(r[3], dtype=np.float32) for r in rows])
+        self.mat = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9)
+        self.post = defaultdict(list)
+        lens = []
+        for i, r in enumerate(rows):
+            tf = Counter(_tokens(r[2]))
+            lens.append(sum(tf.values()))
+            for t, c in tf.items():
+                self.post[t].append((i, c))
+        self.lens = np.asarray(lens, dtype=np.float32)
+        self.avg = float(self.lens.mean()) or 1.0
+        self.titles = [set(_tokens(os.path.splitext(os.path.basename(r[0]))[0])) for r in rows]
+
+    def bm25(self, qtokens, k1=1.2, b=0.75):
+        n = len(self.rows)
+        s = np.zeros(n, dtype=np.float32)
+        for t in set(qtokens):
+            plist = self.post.get(t)
+            if not plist:
+                continue
+            idf = np.log(1 + (n - len(plist) + 0.5) / (len(plist) + 0.5))
+            ids = np.fromiter((i for i, _ in plist), dtype=np.int64)
+            tf = np.fromiter((c for _, c in plist), dtype=np.float32)
+            s[ids] += idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * self.lens[ids] / self.avg))
+        return s / s.max() if s.max() > 0 else s
+
+    def idf(self, t):
+        n, df = len(self.rows), len(self.post.get(t, ()))
+        return float(np.log(1 + (n - df + 0.5) / (df + 0.5)))
+
+    def title_match(self, qtokens):
+        """제목에 들어 있는 질문 단어의 비율. 흔한 단어(생각, 공부)보다 드문 단어(ITIL)에 무게를 둔다."""
+        w = {t: self.idf(t) for t in set(qtokens)}
+        total = sum(w.values())
+        if not total:
+            return np.zeros(len(self.rows), dtype=np.float32)
+        return np.asarray([sum(v for t, v in w.items() if t in tt) / total for tt in self.titles], dtype=np.float32)
+
+
+_cache = {"key": None, "index": None}
+
+
 def _load():
-    db = connect()
-    rows = db.execute("SELECT path, heading, text, vec FROM chunks").fetchall()
-    db.close()
-    if not rows:
-        return [], None
-    mat = np.vstack([np.frombuffer(r[3], dtype=np.float32) for r in rows])
-    mat /= np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
-    return rows, mat
+    """인덱스를 메모리에 올려 둔다. DB가 바뀌었을 때만 다시 읽는다."""
+    key = os.path.getmtime(config.DB_PATH) if os.path.exists(config.DB_PATH) else None
+    if _cache["key"] != key or _cache["index"] is None:
+        db = connect()
+        rows = db.execute("SELECT path, heading, text, vec FROM chunks").fetchall()
+        db.close()
+        _cache["index"] = _Index(rows) if rows else None
+        _cache["key"] = key
+    return _cache["index"]
 
 
 def search(query, k=config.TOP_K, today=None, intent=None):
-    rows, mat = _load()
-    if not rows:
+    index = _load()
+    if index is None:
         return []
+    rows = index.rows
 
     cond = parse_date_query(query, today)            # 날짜: 규칙으로 정확하게
     intent = intent if intent is not None else interpret(query)  # 의도: LLM
@@ -176,15 +245,17 @@ def search(query, k=config.TOP_K, today=None, intent=None):
     purpose = " ".join(config.FOLDERS[f] for f in intent["folders"])
     q = np.asarray(embed([f"{purpose} {core}".strip()])[0], dtype=np.float32)
     q /= np.linalg.norm(q) + 1e-9
-    scores = mat @ q
+    scores = index.mat @ q
+
+    # 키워드 점수: 사용자가 쓴 단어 그대로 + LLM이 정리한 핵심어
+    user_tok = _tokens(" ".join(keywords))
+    scores += W_LEX * index.bm25(user_tok + _tokens(" ".join(_keywords(intent["query"]))))
+    scores += W_TITLE * index.title_match(user_tok)
 
     for i, r in enumerate(rows):
-        path = r[0]
         # 질문 의도에 맞는 폴더의 노트
-        if any(path.startswith(f + "/") for f in intent["folders"]):
-            scores[i] += 0.15
-        # 제목/경로에 질문 단어가 직접 들어 있는 노트
-        scores[i] += 0.05 * sum(1 for t in keywords if t.lower() in path.lower())
+        if any(r[0].startswith(f + "/") for f in intent["folders"]):
+            scores[i] += W_FOLDER
 
     idx = list(np.argsort(-scores))
     # 날짜 조건이 있으면 해당 기간 노트로 좁힌다 (하나도 없으면 전체에서)
@@ -193,7 +264,8 @@ def search(query, k=config.TOP_K, today=None, intent=None):
         if filtered:
             idx = filtered
     # "최근/마지막" 질문이면 관련 있는 노트(1등 점수와 가까운 것)만 남기고 최신순으로
-    if intent["latest"] and not cond:
+    # '최근/마지막'은 LLM 판단이 자주 틀려서, 질문에 그런 말이 직접 있을 때만 쓴다
+    if intent["latest"] and LATEST_WORDS.search(query) and not cond:
         best = scores[idx[0]]
         top = [i for i in idx[:30] if scores[i] >= best - 0.12]
         idx = sorted(top, key=lambda i: _sort_date(rows[i][0]), reverse=True)
@@ -237,4 +309,14 @@ def answer(query):
             {"role": "user", "content": f"[노트]\n{context}\n\n[질문]\n{query}"},
         ]
     )
-    return reply.strip(), hits
+    # 내부용 라벨(=== [[제목]] (날짜, 폴더) ===)이 답변에 새어 나오면 지운다
+    reply = re.sub(r"^\s*===.*?===\s*$", "", reply, flags=re.M).strip()
+    # 출처는 답변이 실제로 [[제목]]으로 언급한 노트만 보여준다 (언급이 없으면 상위 노트만)
+    cited = [h for h in hits if f"[[{os.path.splitext(os.path.basename(h['path']))[0]}]]" in reply]
+    if cited:
+        hits = cited
+    elif "찾지 못했" in reply:
+        hits = []
+    else:
+        hits = [h for h in hits if h["path"] == hits[0]["path"]]
+    return reply, hits

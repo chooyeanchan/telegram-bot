@@ -16,6 +16,25 @@ logger = logging.getLogger(__name__)
 FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
+# 청크 규칙이 바뀌면 올린다 → 다음 인덱싱 때 전체를 다시 만든다
+INDEX_VERSION = "3"
+MIN_CHUNK_CHARS = 200  # 이보다 짧은 섹션은 다음 섹션과 합친다
+
+# 검색에 쓸모없는 섹션(출처 목록 등): 긴 URL 덩어리라 아무 질문에나 걸리는 잡음이 된다
+SKIP_HEADING = re.compile(r"^(참고\s*(출처|자료|문헌|링크)|출처|레퍼런스|references?|sources?|links?)\b", re.I)
+
+
+def clean_text(text):
+    """URL·이미지·링크 문법을 걷어내고 사람이 읽는 글자만 남긴다."""
+    text = re.sub(r"!\[\[[^\]]*\]\]", " ", text)                  # ![[이미지]]
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)              # ![alt](url)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)            # [글자](url) → 글자
+    text = re.sub(r"\[\[([^\]|]+\|)?([^\]]+)\]\]", r"\2", text)     # [[노트|별칭]] → 별칭
+    text = re.sub(r"https?://\S+", " ", text)                       # 맨 URL
+    text = re.sub(r"<[^>]+>", " ", text)                             # html 태그
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
+
 
 def connect():
     os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
@@ -26,6 +45,7 @@ def connect():
         " id INTEGER PRIMARY KEY, path TEXT, heading TEXT, text TEXT, vec BLOB)"
     )
     db.execute("CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path)")
+    db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
     return db
 
 
@@ -65,7 +85,7 @@ def list_notes():
 
 def chunk_note(rel, text):
     """제목(heading) 단위로 나누고, 긴 섹션은 문단 기준으로 다시 자른다."""
-    text = FRONTMATTER.sub("", text)
+    text = clean_text(FRONTMATTER.sub("", text))
     title = os.path.splitext(os.path.basename(rel))[0]
     sections, last, heading = [], 0, ""
     for m in HEADING.finditer(text):
@@ -73,14 +93,30 @@ def chunk_note(rel, text):
         heading, last = m.group(2).strip(), m.start()
     sections.append((heading, text[last:]))
 
-    chunks = []
+    # 제목만 있거나 한두 줄짜리 섹션은 따로 두면 내용 없는 벡터가 되어 아무 질문에나 걸린다
+    # → 다음 섹션 앞에 붙여 하나로 만든다
+    merged, carry = [], ""
     for heading, body in sections:
         body = body.strip()
-        if not body:
+        if not body or SKIP_HEADING.match(heading):
             continue
+        body = f"{carry}\n\n{body}".strip() if carry else body
+        if len(body) < MIN_CHUNK_CHARS:
+            carry = body
+            continue
+        carry = ""
+        merged.append((heading, body))
+    if carry:
+        if merged:
+            merged[-1] = (merged[-1][0], f"{merged[-1][1]}\n\n{carry}")
+        else:
+            merged.append(("", carry))
+
+    chunks = []
+    for heading, body in merged:
         buf = ""
         for para in re.split(r"\n\s*\n", body):
-            if buf and len(buf) + len(para) > config.CHUNK_CHARS:
+            if len(buf) >= MIN_CHUNK_CHARS and len(buf) + len(para) > config.CHUNK_CHARS:
                 chunks.append((heading, buf))
                 buf = ""
             buf = f"{buf}\n\n{para}" if buf else para
@@ -109,8 +145,12 @@ def update_index(progress=None):
     if known and not current:
         raise RuntimeError("볼트에서 노트를 하나도 찾지 못해 인덱스 삭제를 건너뜀 (볼트 경로·접근 권한 확인 필요)")
     removed = [p for p in known if p not in current]
-    changed = [p for p, (mt, _) in current.items() if known.get(p) != mt]
-
+    ver = db.execute("SELECT value FROM meta WHERE key='version'").fetchone()
+    if not ver or ver[0] != INDEX_VERSION:
+        # 청크 규칙이 바뀌었으니 모든 노트를 다시 만든다 (기존 청크는 노트별로 교체되어 중간에 끊겨도 안전)
+        changed = list(current)
+    else:
+        changed = [p for p, (mt, _) in current.items() if known.get(p) != mt]
     for p in removed:
         db.execute("DELETE FROM chunks WHERE path=?", (p,))
         db.execute("DELETE FROM files WHERE path=?", (p,))
@@ -140,6 +180,9 @@ def update_index(progress=None):
         if progress:
             progress(i, len(changed), rel)
 
+    if not ver or ver[0] != INDEX_VERSION:
+        db.execute("INSERT OR REPLACE INTO meta VALUES ('version', ?)", (INDEX_VERSION,))
+        db.commit()
     new = sum(1 for p in changed if p not in known)
     db.close()
     return new, len(changed) - new, len(removed)
