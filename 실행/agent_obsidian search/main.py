@@ -95,8 +95,11 @@ async def periodic_reindex(app):
 
 
 async def post_init(app):
-    new, upd, rem = await asyncio.to_thread(update_index)
-    logger.info(f"시작 인덱싱: 추가 {new}, 갱신 {upd}, 삭제 {rem}")
+    try:
+        new, upd, rem = await asyncio.to_thread(update_index)
+        logger.info(f"시작 인덱싱: 추가 {new}, 갱신 {upd}, 삭제 {rem}")
+    except Exception:
+        logger.exception("시작 인덱싱 실패")
     app.create_task(periodic_reindex(app))
 
 

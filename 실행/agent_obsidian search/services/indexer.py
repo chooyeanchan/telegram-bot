@@ -40,7 +40,14 @@ def _excluded(rel):
 
 def list_notes():
     notes = {}
-    for root, dirs, files in os.walk(config.VAULT_PATH):
+    # 권한이 없으면 os.walk는 오류 없이 빈 결과를 내므로 먼저 직접 열어 확인한다
+    # (예: launchd로 띄운 프로세스가 iCloud 볼트에 접근 권한이 없을 때)
+    os.listdir(config.VAULT_PATH)
+
+    def _onerror(e):
+        raise e
+
+    for root, dirs, files in os.walk(config.VAULT_PATH, onerror=_onerror):
         rel_root = os.path.relpath(root, config.VAULT_PATH)
         rel_root = "" if rel_root == "." else rel_root
         dirs[:] = [d for d in dirs if not _excluded(os.path.join(rel_root, d))]
@@ -99,6 +106,8 @@ def update_index(progress=None):
     current = list_notes()
     known = dict(db.execute("SELECT path, mtime FROM files"))
 
+    if known and not current:
+        raise RuntimeError("볼트에서 노트를 하나도 찾지 못해 인덱스 삭제를 건너뜀 (볼트 경로·접근 권한 확인 필요)")
     removed = [p for p in known if p not in current]
     changed = [p for p, (mt, _) in current.items() if known.get(p) != mt]
 
