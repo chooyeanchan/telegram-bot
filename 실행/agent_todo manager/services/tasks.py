@@ -131,8 +131,13 @@ def today_message(greeting=True):
     lines = _load()
     tree, items = open_items(lines)
     d = date.today()
-    head = f"☀️ **{d.month}월 {d.day}일 {WEEKDAY[d.weekday()]}요일, 오늘의 할 일**" if greeting else "📅 **할 일 목록**"
-    status = f"☐ 남은 일 {len(items)}개 · ✅ 완료 {_done_count(lines)}개"
+    if greeting is None:  # 다른 답변 아래에 붙이는 목록: 시작 문구 없이
+        head = "📅 **지금 남은 할 일**"
+    elif greeting:
+        head = f"✅ 정리 완료!\n\n☀️ **{d.month}월 {d.day}일 {WEEKDAY[d.weekday()]}요일, 오늘의 할 일**"
+    else:
+        head = "✅ 조회 완료!\n\n📅 **할 일 목록**"
+    status = f"☐ 남은 일 {len(items)}개 · ✔️ 완료 {_done_count(lines)}개"
     if not items:
         return f"{head}\n{status}\n\n남은 할 일이 없어요. 전부 끝냈어요 👏"
     tip = '💬 "3 완료"나 "대장약 완료"로 체크하고, "○○ 추가해줘"로 할 일을 넣어요.'
@@ -144,10 +149,10 @@ def done_message(limit=20):
     tree = _select(parse(lines), "done")
     items = _leaves(tree) if tree else []
     if not items:
-        return "✅ 아직 완료한 항목이 없어요."
-    shown = "\n".join(f"✅ {x['text']}" for x in items[:limit])
+        return "✅ 조회 완료!\n\n아직 완료한 항목이 없어요."
+    shown = "\n".join(f"✔️ {x['text']}" for x in items[:limit])
     more = f"\n… 외 {len(items) - limit}개" if len(items) > limit else ""
-    return f"✅ **완료한 일** {len(items)}개 (최근 순)\n\n{shown}{more}"
+    return f"✅ 조회 완료!\n\n✔️ **완료한 일** {len(items)}개 (최근 순)\n\n{shown}{more}"
 
 
 # ---------- 추가 ----------
@@ -165,7 +170,7 @@ def add(item):
     lines = _load()
     _, items = open_items(lines)
     if any(x["text"] == item for x in items):
-        return f"💡 이미 할 일에 있어요.\n\n☐ {item}"
+        return f"✅ 확인 완료!\n\n이미 할 일에 있어서 추가하지 않았어요.\n☐ {item}"
     new = f"- [ ] {item}"
     sep = _sep(lines)
     if sep is not None:
@@ -176,7 +181,7 @@ def add(item):
         lines += [new, ""]
     _save(lines)
     _, items = open_items(lines)
-    return f"✍️ 할 일에 추가했어요.\n\n☐ {item}\n\n남은 일 {len(items)}개"
+    return f"✅ 추가 완료!\n\n☐ {item}\n\n남은 일 {len(items)}개"
 
 
 # ---------- 완료 ----------
@@ -252,8 +257,8 @@ def _do_complete(lines, found):
     _save(lines)
     _last_done["text"] = done
     _, left = open_items(lines)
-    done = "\n".join(f"✅ ~~{x['text']}~~" for x in found)
-    return f"🎉 완료 처리했어요!\n\n{done}\n\n☐ 남은 일 {len(left)}개 · 잘못 눌렀으면 \"취소\""
+    shown = "\n".join(f"✔️ ~~{x['text']}~~" for x in found)
+    return f"✅ 체크 완료!\n\n{shown}\n\n☐ 남은 일 {len(left)}개 · 잘못 눌렀으면 \"취소\" 🎉"
 
 
 def complete(ref):
@@ -265,11 +270,11 @@ def complete(ref):
         return None  # 글자가 딱 맞지 않으면 바로 고치지 않고 AI 해석 + 확인 버튼으로
     if not found:
         if by_number:
-            return f"🤔 {ref}번 할 일은 없어요.\n\n" + today_message(greeting=False)
+            return f"✅ 확인 완료!\n\n{ref}번 할 일은 없어요.\n\n" + today_message(greeting=None)
         return None
     if len(found) > 1 and not by_number:
         cands = "\n".join(f"{items.index(x) + 1}. {x['text']}" for x in found)
-        return f"🤔 어떤 걸 완료할까요? 번호로 알려 주세요 (예: \"{items.index(found[0]) + 1} 완료\")\n\n{cands}"
+        return f"✅ 확인 완료!\n\n비슷한 할 일이 여러 개예요. 번호로 알려 주세요 (예: \"{items.index(found[0]) + 1} 완료\")\n\n{cands}"
     return _do_complete(lines, found)
 
 
@@ -279,7 +284,7 @@ def complete_texts(texts):
     _, items = open_items(lines)
     found = [x for t in texts for x in items if x["text"] == t][: len(texts)]
     if not found:
-        return "🤔 그사이 노트가 바뀌었는지 그 할 일을 찾지 못했어요.\n\n" + today_message(greeting=False)
+        return "✅ 확인 완료!\n\n그사이 노트가 바뀌었는지 그 할 일을 찾지 못했어요.\n\n" + today_message(greeting=None)
     return _do_complete(lines, found)
 
 
@@ -287,7 +292,7 @@ def undo():
     """방금 완료한 항목을 할 일로 되돌린다. 묶음 안에 있던 항목은 그 묶음 끝으로 돌려놓는다."""
     done = _last_done["text"]
     if not done:
-        return "↩️ 되돌릴 완료 기록이 없어요. (봇을 다시 켜면 기록이 지워져요)"
+        return "✅ 확인 완료!\n\n되돌릴 완료 기록이 없어요. (봇을 다시 켜면 기록이 지워져요)"
     lines = _load()
     restored = []
     for t, parent in done:
@@ -317,8 +322,8 @@ def undo():
     _save(lines)
     _last_done["text"] = None
     if not restored:
-        return "↩️ 방금 완료한 항목을 노트에서 찾지 못했어요."
-    return "↩️ 다시 할 일로 되돌렸어요.\n\n" + "\n".join(f"☐ {t}" for t in restored)
+        return "✅ 확인 완료!\n\n방금 완료한 항목을 노트에서 찾지 못했어요."
+    return "✅ 되돌리기 완료!\n\n↩️ 다시 할 일로 돌렸어요.\n" + "\n".join(f"☐ {t}" for t in restored)
 
 
 def _walk(node):
@@ -330,7 +335,7 @@ def _walk(node):
 # ---------- 메시지 처리 ----------
 
 HELP = (
-    "📅 **todo manager**\n\n"
+    "✅ 안내 완료!\n\n📅 **todo manager 사용법**\n\n"
     "• 매일 아침 8시에 오늘의 할 일을 보내 드려요\n"
     "• \"할일\" → 지금 남은 할 일\n"
     "• \"대장약 먹기 추가해줘\" → 할 일 추가\n"
@@ -358,7 +363,7 @@ def handle_rules(text):
     if m:
         item = _parse_add(q)
         if not item or len(item) < 2:
-            return "✍️ 어떤 할 일을 추가할까요?\n\n예) \"대장내시경 약 먹기 추가해줘\""
+            return "✅ 확인 완료!\n\n어떤 할 일을 추가할까요?\n예) \"대장내시경 약 먹기 추가해줘\""
         return add(item)
     m = DONE_CMD.search(q)
     if DONE_LIST_Q.search(q) and not (m and not q.endswith("?")):
@@ -426,7 +431,7 @@ def handle_ai(text):
         )
         data = json.loads(raw)
     except Exception:
-        return "🤖 AI가 지금 응답하지 않아요. 이렇게 말해 주세요.\n\n" + HELP, False
+        return "✅ 확인 완료!\n\nAI가 지금 응답하지 않아요. 아래처럼 말해 주시면 바로 처리해요.\n\n" + HELP.split("\n\n", 1)[1], False
 
     action = str(data.get("action", "")).strip()
     if action == "add":
@@ -434,19 +439,19 @@ def handle_ai(text):
         if len(item) >= 2:
             _pending.clear()
             _pending.update(op="add", item=item, at=time.time())
-            return f"🤖 이렇게 이해했어요\n\n✍️ 할 일 추가\n☐ {item}\n\n이대로 추가할까요?", True
+            return f"✅ 해석 완료!\n\n🤖 할 일 추가로 이해했어요\n☐ {item}\n\n이대로 추가할까요?", True
     elif action == "complete":
         # AI는 번호를 자주 헷갈리므로 핵심 단어만 받고, 항목 찾기는 규칙(find)으로 한다
         kw = str(data.get("keyword", "")).strip()
         found = find(kw, items)[0] if kw else []
         if len(found) > 1:
             cands = "\n".join(f"{items.index(x) + 1}. {x['text']}" for x in found)
-            return f"🤔 어떤 걸 완료할까요? 번호로 알려 주세요 (예: \"{items.index(found[0]) + 1} 완료\")\n\n{cands}", False
+            return f"✅ 해석 완료!\n\n비슷한 할 일이 여러 개예요. 번호로 알려 주세요 (예: \"{items.index(found[0]) + 1} 완료\")\n\n{cands}", False
         if found:
             _pending.clear()
             _pending.update(op="complete", texts=[found[0]["text"]], at=time.time())
-            return f"🤖 이렇게 이해했어요\n\n🎯 완료 처리\n✅ {found[0]['text']}\n\n이대로 완료할까요?", True
-        return "🤔 어떤 할 일을 끝내신 건지 모르겠어요. 번호로 알려 주세요 (예: \"3 완료\")\n\n" + today_message(greeting=False), False
+            return f"✅ 해석 완료!\n\n🤖 이 할 일을 끝내신 걸로 이해했어요\n✔️ {found[0]['text']}\n\n이대로 체크할까요?", True
+        return "✅ 해석 완료!\n\n어떤 할 일을 끝내신 건지 모르겠어요. 번호로 알려 주세요 (예: \"3 완료\")\n\n" + today_message(greeting=None), False
     elif action == "list":
         return today_message(greeting=False), False
     elif action == "advice":
@@ -454,8 +459,8 @@ def handle_ai(text):
         if reply:
             reply = re.sub(r"\s*▸\s*", "\n▸ ", reply).strip()
             reply = re.sub(r"\n(▸)", r"\n\n\1", reply, count=1)
-            return f"🤖 {reply}", False
-    return "🤔 할 일과 관련된 말인지 잘 모르겠어요.\n\n" + HELP, False
+            return f"✅ 분석 완료!\n\n🤖 {reply}", False
+    return "✅ 확인 완료!\n\n할 일과 관련된 말인지 잘 모르겠어요.\n\n" + HELP.split("\n\n", 1)[1], False
 
 
 def confirm(yes):
@@ -467,9 +472,9 @@ def confirm(yes):
     p = dict(_pending)
     _pending.clear()
     if time.time() - p["at"] > PENDING_SECONDS:
-        return "⌛ 확인 시간이 지나서 취소했어요. 다시 말씀해 주세요."
+        return "✅ 취소 완료!\n\n⌛ 확인 시간(10분)이 지나서 취소했어요. 다시 말씀해 주세요."
     if not yes:
-        return "👌 알겠어요, 아무것도 바꾸지 않았어요."
+        return "✅ 취소 완료!\n\n노트는 바꾸지 않았어요."
     if p["op"] == "add":
         return add(p["item"])
     return complete_texts(p["texts"])

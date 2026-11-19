@@ -108,7 +108,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send(update.message.reply_text, reply)
             return
         # 2) 못 알아들으면 AI가 해석 (노트를 고칠 땐 확인 버튼)
-        msg = await update.message.reply_text("🤖 무슨 뜻인지 생각해 볼게요…")
+        msg = await update.message.reply_text("✅ 접수 완료!\n\n🤖 무슨 뜻인지 생각해 볼게요…")
         t0 = time.time()
         async with note_lock:
             reply, ask = await asyncio.to_thread(tasks.handle_ai, q)
@@ -127,7 +127,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     async with note_lock:
         reply = await asyncio.to_thread(tasks.confirm, query.data == "yes")
-    await send(query.edit_message_text, reply or "⌛ 이미 처리했거나 지난 요청이에요.")
+    await send(query.edit_message_text, reply or "✅ 확인 완료!\n\n이미 처리했거나 지난 요청이에요.")
     logger.info(f"확인 버튼 | {query.data}")
 
 
