@@ -162,7 +162,8 @@ def parse_add(q):
     """'대장내시경 약 먹기 할일 추가해줘' → (노트 파일명, '대장내시경 약 먹기'). 추가 명령이 아니면 None."""
     q = q.strip()
     m = ADD_CMD.search(q)
-    if not m or not ADD_Q.search(q[: m.start()] + " "):
+    # 이 봇에서 "○○ 추가해줘"는 할 일 추가뿐이므로 '할일' 말이 없어도 to do list로 본다
+    if not m:
         return None
     body = q[: m.start()]
     name = _pick_note(body)
@@ -205,7 +206,7 @@ def try_add(query):
     parsed = parse_add(query)
     if not parsed:
         m = ADD_CMD.search(query.strip())
-        if m and re.fullmatch(rf"\s*{LIST_WORD}\s*", query.strip()[: m.start()], flags=re.I):
+        if m and re.fullmatch(rf"\s*({LIST_WORD})?\s*", query.strip()[: m.start()], flags=re.I):
             return "✍️ 어떤 할 일을 추가할까요?\n\n예) \"대장내시경 약 먹기 할일 추가해줘\"", []
         return None
     name, item = parsed
