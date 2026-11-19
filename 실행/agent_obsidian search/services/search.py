@@ -262,6 +262,25 @@ def _load():
     return _cache["index"]
 
 
+# 질문이 가리키는 기록 종류 → 폴더 (사용자가 설명한 1.2_record 구조)
+KIND_FOLDERS = [
+    (re.compile(r"(소라가\s*(쓴|준|보낸)|소라한테\s*받은|받은\s*편지)"), "1.9_storage/letter by sora"),
+    (re.compile(r"(일기|저널|다이어리)"), "1.2_record/1_journal"),
+    (re.compile(r"(편지|소라\s*레터|레터)"), "1.2_record/2_sora letter"),
+    (re.compile(r"(책\s*감상|감상평|서평|독후감)"), "1.2_record/3_book review"),
+    (re.compile(r"(포스팅|블로그|게시글)"), "1.2_record/4_posting"),
+    (re.compile(r"(작업\s*로그|개발\s*로그|데브\s*로그|작업\s*정리)"), "1.9_storage/log"),
+    (re.compile(r"(위스키)"), "1.9_storage/materials/whisky note"),
+]
+
+
+def _kind_folder(q):
+    for pat, folder in KIND_FOLDERS:
+        if pat.search(q):
+            return folder
+    return None
+
+
 def search(query, k=config.TOP_K, today=None, intent=None):
     index = _load()
     if index is None:
@@ -297,7 +316,14 @@ def search(query, k=config.TOP_K, today=None, intent=None):
             idx = filtered
     # "최근/마지막" 질문이면 관련 있는 노트(1등 점수와 가까운 것)만 남기고 최신순으로
     # '최근/마지막'은 LLM 판단이 자주 틀려서, 질문에 그런 말이 직접 있을 때만 쓴다
-    if intent["latest"] and LATEST_WORDS.search(query) and not cond:
+    # "최근 일기", "마지막 편지"처럼 기록 종류를 짚은 경우: 내용 유사도가 아니라 그 폴더의 날짜순으로
+    # (내용으로 찾으면 '일기를 다시 시작했다'는 옛 일기가 '일기'라는 말에 가장 가깝게 잡힌다)
+    kind = _kind_folder(query)
+    if kind and LATEST_WORDS.search(query) and not cond:
+        cand = [i for i in idx if rows[i][0].startswith(kind + "/")]
+        if cand:
+            idx = sorted(cand, key=lambda i: (_sort_date(rows[i][0]), os.path.basename(rows[i][0]), float(scores[i])), reverse=True)
+    elif intent["latest"] and LATEST_WORDS.search(query) and not cond:
         best = scores[idx[0]]
         top = [i for i in idx[:30] if scores[i] >= best - 0.12]
         idx = sorted(top, key=lambda i: _sort_date(rows[i][0]), reverse=True)
