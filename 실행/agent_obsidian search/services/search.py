@@ -13,22 +13,42 @@ import numpy as np
 import config
 from services.indexer import connect
 from services.ollama_client import chat, embed
+from services.records import try_answer as record_answer
+from services.tasks import try_answer as task_answer
 
 SYSTEM_PROMPT = """너는 사용자의 옵시디언 노트에서 답을 찾아 주는 비서다. 오늘 날짜는 {today}이다.
 
+[볼트 폴더 안내: 폴더마다 노트의 성격이 다르다]
+{folders}
+
 [규칙]
 - 아래 [노트] 내용만 근거로, 한국어 존댓말(~요)로 짧고 정확하게 답한다. 노트에 없는 내용은 지어내지 않는다.
+- 노트 라벨의 괄호 안 분류를 보고 노트 성격을 구분한다. 예: 내가 소라에게 쓴 편지와 소라가 나에게 쓴 편지는 다르고, 내 일기와 웹에서 수집한 리서치 정보도 다르다. 질문이 찾는 성격의 노트만 쓴다.
 - [노트]에는 검색이 잘못 가져온 무관한 노트도 섞여 있다. 질문 주제를 직접 다루는 노트만 쓰고, 단어만 겹치는 노트(예: 질문 단어를 예시로 언급한 작업 로그)는 언급하지 않는다.
 - 날짜 조건이 있으면 그 기간 노트만 쓴다.
 - 질문 대상이 여럿이면(예: 부모님 → 어머니·아버지·장인·장모) 노트에 있는 대상을 빠짐없이 답한다.
 - 숫자·날짜는 노트에 적힌 의미 그대로 옮긴다(예: 생일과 환갑 날짜를 섞지 않는다).
-- 답이 없으면 "노트에서 찾지 못했어요." 한 줄만 쓴다.
+- 답이 없으면 "🔍 노트에서 찾지 못했어요." 한 줄만 쓴다.
 - 노트를 언급할 때는 === 사이에 적힌 제목을 앞의 날짜 숫자까지 글자 그대로 [[제목]]으로 쓴다.
 
 [형식]
-1. 첫 문단: 질문에 대한 핵심 답을 1~2문장으로.
-2. 빈 줄 하나 뒤에 근거 노트를 "- [[제목]]: 한 줄 요약" 목록으로 (관련 노트만, 최대 5개, 날짜순).
-3. 전체 10줄 이내. 인사말, 맺음말, 마크다운 제목(#), 굵게(**), === 표시, 폴더 경로는 쓰지 않는다."""
+1. 첫 문단: 내용에 어울리는 이모지 하나로 시작해, 질문에 대한 핵심 답을 1~2문장으로.
+2. 답의 요점이 여러 개면 빈 줄 뒤에 요점마다 "▸ "로 시작하는 짧은 줄을 2~4개 쓴다 (요점이 하나면 생략, "요점"이라는 제목은 쓰지 않는다).
+3. 빈 줄 뒤에 근거 노트를 "- [[제목]]: 한 줄 요약" 목록으로 (관련 노트만, 최대 5개, 날짜순).
+4. 전체 12줄 이내. 인사말, 맺음말, 마크다운 제목(#), 굵게(**), === 표시, 폴더 경로는 쓰지 않는다.
+
+[형식 예시]
+🏃 러닝은 2026년 6월 말에 다시 시작했어요.
+
+▸ 오랜만에 뛰어 숨이 찼지만 상쾌했어요
+▸ 꾸준히 뛰려고 주 3회 목표를 세웠어요
+
+- [[260630 오랜만에 러닝]]: 다시 러닝을 시작한 날의 기록"""
+
+
+def _folder_guide():
+    return "\n".join(f"- {v}" for v in config.FOLDERS.values()) or "- (폴더 설명 없음)"
+
 
 MAX_NOTES = 6          # 답변에 넘길 최대 노트 수
 MAX_CONTEXT = 5000     # 답변에 넘길 본문 최대 길이(문자). 길수록 느려진다
@@ -341,6 +361,11 @@ def _group_by_note(hits):
 
 
 def answer(query):
+    # 할 일 질문은 체크 여부를 규칙으로 읽어 바로 답한다 (LLM은 완료/미완료를 자주 섞는다)
+    # 기록 목록 질문("어떤 일기 있어?")도 폴더를 직접 읽어 답한다
+    direct = task_answer(query) or record_answer(query)
+    if direct:
+        return direct
     hits = search(query, k=MAX_NOTES * 2)
     if not hits:
         return "인덱스가 비어 있어요. 먼저 인덱싱을 실행해 주세요.", []
@@ -369,7 +394,7 @@ def answer(query):
 
     reply = chat(
         [
-            {"role": "system", "content": SYSTEM_PROMPT.format(today=date.today().isoformat())},
+            {"role": "system", "content": SYSTEM_PROMPT.format(today=date.today().isoformat(), folders=_folder_guide())},
             {"role": "user", "content": f"[노트]\n{context}\n\n[질문]\n{query}"},
         ]
     )
@@ -377,6 +402,10 @@ def answer(query):
     reply = re.sub(r"^\s*===.*?===\s*$", "", reply, flags=re.M)
     reply = re.sub(r"^\s*#+\s*", "", reply, flags=re.M)
     reply = reply.replace("**", "")
+    # 요점 줄 정리: "▸ 요점" 같은 제목 줄은 지우고, "- 요점"으로 쓴 요점은 ▸로 맞춘다
+    reply = re.sub(r"^\s*▸?\s*요점\s*:?\s*$", "", reply, flags=re.M)
+    reply = re.sub(r"^(\s*▸)\s*요점\s*\d*\s*:\s*", r"\1 ", reply, flags=re.M)
+    reply = re.sub(r"^\s*[-*•]\s+(?!\[\[)", "▸ ", reply, flags=re.M)
     reply = re.sub(r"\n{3,}", "\n\n", reply).strip()
 
     # [[제목]]을 실제 노트 제목으로 고치고, 언급된 노트만 출처로 남긴다

@@ -98,14 +98,56 @@ def _folder_name(path):
     return re.sub(r"^[\d.]+_", "", parts[-1]) if parts else ""
 
 
+# 폴더별 이모지: 노트가 어떤 종류(일기·편지·리서치…)인지 한눈에 보이게
+FOLDER_EMOJI = [
+    ("1.0_llm wiki", "📚"),
+    ("1.1_tasks", "✅"),
+    ("1.2_record/1_journal", "📔"),
+    ("1.2_record/2_sora letter", "💌"),
+    ("1.2_record/3_book review", "📖"),
+    ("1.2_record/4_posting", "✍️"),
+    ("1.3_writing", "🖋"),
+    ("1.4_habit tracker", "📈"),
+    ("1.5_yearly goals", "🎯"),
+    ("1.9_storage/letter by sora", "💝"),
+    ("1.9_storage/log", "🛠"),
+    ("1.9_storage/materials/memo", "📝"),
+    ("1.9_storage/materials/whisky note", "🥃"),
+    ("1.9_storage/materials/에이전트 지식", "🤖"),
+    ("1.9_storage/materials/커리어", "💼"),
+]
+
+
+def _emoji(path):
+    best = ("", "📄")
+    for key, e in FOLDER_EMOJI:
+        if path.startswith(key + "/") and len(key) > len(best[0]):
+            best = (key, e)
+    return best[1]
+
+
+def _title_of(path):
+    return os.path.splitext(os.path.basename(path))[0]
+
+
 def render(reply, hits):
-    """답변을 텔레그램 HTML로: 노트 제목은 굵게, 목록은 •, 끝에 참고 노트 목록."""
+    """답변을 텔레그램 HTML로: **굵게**·노트 제목은 굵게, 근거 노트는 폴더 이모지로, 끝에 참고 노트."""
     body = "\n".join(line.rstrip() for line in reply.splitlines())
-    body = re.sub(r"^\s*[-*•]\s+", "• ", body, flags=re.M)
-    body = re.sub(r"([^\n])\n(• )", r"\1\n\n\2", body, count=1)  # 첫 문단과 목록 사이 한 줄 띄우기
+    body = re.sub(r"^[ \t]*[-*•][ \t]+(?!\*)", "• ", body, flags=re.M)
+    if hits:  # LLM 답변: 첫 문단과 목록 사이 한 줄 띄우기 (규칙 답변은 이미 모양을 갖춰 옴)
+        body = re.sub(r"([^\n])\n(• )", r"\1\n\n\2", body, count=1)
     body = re.sub(r"\n{3,}", "\n\n", body)
     listed = set(re.findall(r"^• \[\[(.+?)\]\]", body, flags=re.M))
+    by_title = {_title_of(h["path"]): h["path"] for h in hits}
     body = html.escape(body)
+    body = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", body)
+    # 근거 노트 목록은 • 대신 그 노트 폴더의 이모지로 (💌 편지, 📔 일기 …)
+    body = re.sub(
+        r"^• \[\[(.+?)\]\]",
+        lambda m: f"{_emoji(by_title.get(html.unescape(m.group(1)), ''))} [[{m.group(1)}]]",
+        body,
+        flags=re.M,
+    )
     body = re.sub(r"\[\[(.+?)\]\]", r"<b>\1</b>", body)
     if len(body) > 3300:
         body = body[:3300].rsplit("\n", 1)[0] + "\n…"
@@ -114,14 +156,16 @@ def render(reply, hits):
     # 본문 목록에 이미 나온 노트는 다시 쓰지 않고, 노트가 있는 폴더만 한 줄로 보여준다
     extra = []
     for h in hits[:5]:
-        title = os.path.splitext(os.path.basename(h["path"]))[0]
+        title = _title_of(h["path"])
         if title not in listed:
             folder = _folder_name(h["path"])
-            extra.append(f"• {html.escape(title)}" + (f"  <i>{html.escape(folder)}</i>" if folder else ""))
-    folders = list(dict.fromkeys(f for f in (_folder_name(h["path"]) for h in hits[:5]) if f))
+            extra.append(f"{_emoji(h['path'])} {html.escape(title)}" + (f"  <i>{html.escape(folder)}</i>" if folder else ""))
+    folders = list(dict.fromkeys(
+        f"{_emoji(h['path'])} {_folder_name(h['path'])}" for h in hits[:5] if _folder_name(h["path"])
+    ))
     if extra:
         return f"{body}\n\n📎 <b>참고한 노트</b>\n" + "\n".join(extra)
-    return f"{body}\n\n📂 <i>{html.escape(', '.join(folders))}</i>" if folders else body
+    return f"{body}\n\n📂 <i>{html.escape(' · '.join(folders))}</i>" if folders else body
 
 
 async def periodic_reindex(app):

@@ -17,7 +17,7 @@ FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
 # 청크 규칙이 바뀌면 올린다 → 다음 인덱싱 때 전체를 다시 만든다
-INDEX_VERSION = "3"
+INDEX_VERSION = "5"
 MIN_CHUNK_CHARS = 200  # 이보다 짧은 섹션은 다음 섹션과 합친다
 
 # 검색에 쓸모없는 섹션(출처 목록 등): 긴 URL 덩어리라 아무 질문에나 걸리는 잡음이 된다
@@ -32,6 +32,9 @@ def clean_text(text):
     text = re.sub(r"\[\[([^\]|]+\|)?([^\]]+)\]\]", r"\2", text)     # [[노트|별칭]] → 별칭
     text = re.sub(r"https?://\S+", " ", text)                       # 맨 URL
     text = re.sub(r"<[^>]+>", " ", text)                             # html 태그
+    # 체크박스를 글로 바꿔 둔다: LLM이 "- [x]"와 "- [ ]"를 구분하지 못해 끝낸 일을 할 일로 답한다
+    text = re.sub(r"^(\s*[-*+]\s+)\[[xX]\]\s*", r"\1(완료) ", text, flags=re.M)
+    text = re.sub(r"^(\s*[-*+]\s+)\[ \]\s*", r"\1(미완료) ", text, flags=re.M)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text
 
